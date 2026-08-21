@@ -66,6 +66,16 @@ namespace RdpSessionAgent
 
         [DllImport("wtsapi32.dll")]
         public static extern void WTSFreeMemory(IntPtr pMemory);
+
+        public static int WtsSessionInfoSize
+        {
+            get { return Marshal.SizeOf(typeof(WTS_SESSION_INFO)); }
+        }
+
+        public static WTS_SESSION_INFO PtrToSessionInfo(IntPtr pointer)
+        {
+            return (WTS_SESSION_INFO)Marshal.PtrToStructure(pointer, typeof(WTS_SESSION_INFO));
+        }
     }
 }
 '@
@@ -121,12 +131,11 @@ function Get-WtsRdpSessions {
             throw (New-Object ComponentModel.Win32Exception($errorCode))
         }
 
-        $infoType = [type][RdpSessionAgent.WTS_SESSION_INFO]
-        $infoSize = [Runtime.InteropServices.Marshal]::SizeOf($infoType)
+        $infoSize = [RdpSessionAgent.WtsNativeMethods]::WtsSessionInfoSize
 
         for ($index = 0; $index -lt $count; $index++) {
             $current = [IntPtr]::Add($buffer, ($index * $infoSize))
-            $info = [Runtime.InteropServices.Marshal]::PtrToStructure($current, $infoType)
+            $info = [RdpSessionAgent.WtsNativeMethods]::PtrToSessionInfo($current)
 
             $state = $null
             if ([int]$info.State -eq 0) {
