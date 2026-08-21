@@ -1,0 +1,8 @@
+.vscode/
+.idea/
+*.log
+config.json
+credential.dat
+state.json
+spool/
+logs/
