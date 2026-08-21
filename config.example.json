@@ -4,5 +4,6 @@
   "event_log_name": "Microsoft-Windows-TerminalServices-LocalSessionManager/Operational",
   "initial_lookback_minutes": 60,
   "max_events_per_batch": 200,
-  "include_local_sessions": false
+  "include_local_sessions": false,
+  "snapshot_interval_minutes": 5
 }
