@@ -16,6 +16,7 @@ if ([string]::IsNullOrWhiteSpace($RootPath)) {
 . (Join-Path $PSScriptRoot 'Modules\Spool.ps1')
 . (Join-Path $PSScriptRoot 'Modules\ApiClient.ps1')
 . (Join-Path $PSScriptRoot 'Modules\EventCollector.ps1')
+. (Join-Path $PSScriptRoot 'Modules\WtsSessionCollector.ps1')
 
 function Get-BootTimeUtc {
     $os = Get-WmiObject -Class Win32_OperatingSystem -ErrorAction Stop
@@ -33,6 +34,42 @@ function Send-PendingSpool {
         Remove-Item -LiteralPath $file.FullName -Force
         Write-AgentLog -RootPath $AgentRoot -Level 'INFO' -Message ('API accepted={0} duplicates={1}' -f $response.accepted, $response.duplicates)
     }
+}
+
+function Invoke-WtsReconciliationIfDue {
+    param(
+        [Parameter(Mandatory=$true)]$Config,
+        [Parameter(Mandatory=$true)][string]$Secret,
+        [Parameter(Mandatory=$true)][string]$Version,
+        [Parameter(Mandatory=$true)][string]$AgentRoot
+    )
+
+    $state = Get-AgentState -RootPath $AgentRoot
+    $interval = 5
+    if ($null -ne $Config.PSObject.Properties['snapshot_interval_minutes']) {
+        $interval = [int]$Config.snapshot_interval_minutes
+    }
+    if (-not (Test-AgentSnapshotDue -State $state -IntervalMinutes $interval)) {
+        return
+    }
+
+    $sessions = @(Get-WtsRdpSessions)
+    $metadata = Get-AgentHostMetadata
+    $snapshotAt = [DateTime]::UtcNow.ToString('o')
+    $snapshot = [ordered]@{
+        contract_version = 1
+        agent_version = $Version
+        boot_time_utc = Get-BootTimeUtc
+        agent_time_utc = $snapshotAt
+        hostname = $metadata.hostname
+        fqdn = $metadata.fqdn
+        os_version = $metadata.os_version
+        sessions = $sessions
+    }
+
+    $response = Send-AgentSnapshot -Config $Config -Secret $Secret -Snapshot $snapshot
+    Save-AgentSnapshotTime -RootPath $AgentRoot -SnapshotAtUtc $snapshotAt
+    Write-AgentLog -RootPath $AgentRoot -Level 'INFO' -Message ('WTS snapshot observed={0} created={1} updated={2} closed={3}' -f $response.observed, $response.created, $response.updated, $response.closed)
 }
 
 try {
@@ -59,22 +96,23 @@ try {
         else {
             Write-AgentLog -RootPath $RootPath -Level 'INFO' -Message 'No new RDP session events.'
         }
-        exit 0
+    }
+    else {
+        $checkpoint = [long]$collection.last_scanned_record_id
+        $envelope = [ordered]@{
+            contract_version = 1
+            agent_version = $version
+            boot_time_utc = Get-BootTimeUtc
+            agent_time_utc = [DateTime]::UtcNow.ToString('o')
+            events = $events
+        }
+
+        $spoolPath = Save-SpoolBatch -RootPath $RootPath -Envelope $envelope -CheckpointRecordId $checkpoint
+        Write-AgentLog -RootPath $RootPath -Level 'INFO' -Message ('Collected {0} event(s); spool={1}' -f $events.Count, (Split-Path -Leaf $spoolPath))
+        Send-PendingSpool -Config $config -Secret $secret -AgentRoot $RootPath
     }
 
-    $checkpoint = [long]$collection.last_scanned_record_id
-    $envelope = [ordered]@{
-        contract_version = 1
-        agent_version = $version
-        boot_time_utc = Get-BootTimeUtc
-        agent_time_utc = [DateTime]::UtcNow.ToString('o')
-        events = $events
-    }
-
-    $spoolPath = Save-SpoolBatch -RootPath $RootPath -Envelope $envelope -CheckpointRecordId $checkpoint
-    Write-AgentLog -RootPath $RootPath -Level 'INFO' -Message ('Collected {0} event(s); spool={1}' -f $events.Count, (Split-Path -Leaf $spoolPath))
-
-    Send-PendingSpool -Config $config -Secret $secret -AgentRoot $RootPath
+    Invoke-WtsReconciliationIfDue -Config $config -Secret $secret -Version $version -AgentRoot $RootPath
     exit 0
 }
 catch {
