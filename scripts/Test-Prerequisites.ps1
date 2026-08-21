@@ -18,7 +18,20 @@ catch {
 }
 
 $wtsApiPath = Join-Path $env:SystemRoot 'System32\wtsapi32.dll'
-$results += [PSCustomObject]@{ Check='WTS API'; Ok=(Test-Path -LiteralPath $wtsApiPath); Detail=$wtsApiPath }
+if (-not (Test-Path -LiteralPath $wtsApiPath)) {
+    $results += [PSCustomObject]@{ Check='WTS API'; Ok=$false; Detail=$wtsApiPath }
+}
+else {
+    try {
+        $repositoryRoot = Split-Path -Parent $PSScriptRoot
+        . (Join-Path $repositoryRoot 'src\Modules\WtsSessionCollector.ps1')
+        $sessions = @(Get-WtsRdpSessions)
+        $results += [PSCustomObject]@{ Check='WTS API'; Ok=$true; Detail=('Enumeration succeeded; remote sessions observed={0}' -f $sessions.Count) }
+    }
+    catch {
+        $results += [PSCustomObject]@{ Check='WTS API'; Ok=$false; Detail=$_.Exception.Message }
+    }
+}
 
 if (-not [string]::IsNullOrWhiteSpace($ApiBaseUrl)) {
     try {
