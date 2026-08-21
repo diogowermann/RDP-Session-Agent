@@ -108,14 +108,30 @@ function Convert-LsmXmlToAgentEvent {
     }
 }
 
+function Invoke-GetWinEventAllowEmpty {
+    param([Parameter(Mandatory=$true)][scriptblock]$Operation)
+
+    try {
+        return @(& $Operation)
+    }
+    catch {
+        if ([string]$_.FullyQualifiedErrorId -like 'NoMatchingEventsFound*') {
+            return @()
+        }
+        throw
+    }
+}
+
 function Get-LatestRelevantRecordId {
     param([Parameter(Mandatory=$true)][string]$LogName)
 
-    $latest = Get-WinEvent -FilterHashtable @{ LogName=$LogName; Id=@(21,23,24,25) } -MaxEvents 1 -ErrorAction Stop
-    if ($null -eq $latest) {
+    $latest = @(Invoke-GetWinEventAllowEmpty -Operation {
+        Get-WinEvent -FilterHashtable @{ LogName=$LogName; Id=@(21,23,24,25) } -MaxEvents 1 -ErrorAction Stop
+    })
+    if ($latest.Count -eq 0) {
         return 0
     }
-    return [long]$latest.RecordId
+    return [long]$latest[0].RecordId
 }
 
 function Get-RdpSessionEvents {
@@ -132,16 +148,20 @@ function Get-RdpSessionEvents {
     if (-not [bool]$State.initialized) {
         $lookback = [int]$Config.initial_lookback_minutes
         if ($lookback -le 0) { $lookback = 60 }
-        $records = @(Get-WinEvent -FilterHashtable @{
-            LogName=$logName
-            Id=@(21,23,24,25)
-            StartTime=(Get-Date).AddMinutes(-1 * $lookback)
-        } -MaxEvents $maximum -Oldest -ErrorAction Stop)
+        $records = @(Invoke-GetWinEventAllowEmpty -Operation {
+            Get-WinEvent -FilterHashtable @{
+                LogName=$logName
+                Id=@(21,23,24,25)
+                StartTime=(Get-Date).AddMinutes(-1 * $lookback)
+            } -MaxEvents $maximum -Oldest -ErrorAction Stop
+        })
     }
     else {
         $lastRecordId = [long]$State.last_record_id
         $xpath = '*[System[(EventID=21 or EventID=23 or EventID=24 or EventID=25) and EventRecordID>' + $lastRecordId + ']]'
-        $records = @(Get-WinEvent -LogName $logName -FilterXPath $xpath -MaxEvents $maximum -Oldest -ErrorAction Stop)
+        $records = @(Invoke-GetWinEventAllowEmpty -Operation {
+            Get-WinEvent -LogName $logName -FilterXPath $xpath -MaxEvents $maximum -Oldest -ErrorAction Stop
+        })
     }
 
     $events = @()
