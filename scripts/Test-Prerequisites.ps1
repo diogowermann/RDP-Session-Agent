@@ -17,6 +17,9 @@ catch {
     $results += [PSCustomObject]@{ Check='EventLog'; Ok=$false; Detail=$_.Exception.Message }
 }
 
+$wtsApiPath = Join-Path $env:SystemRoot 'System32\wtsapi32.dll'
+$results += [PSCustomObject]@{ Check='WTS API'; Ok=(Test-Path -LiteralPath $wtsApiPath); Detail=$wtsApiPath }
+
 if (-not [string]::IsNullOrWhiteSpace($ApiBaseUrl)) {
     try {
         [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
