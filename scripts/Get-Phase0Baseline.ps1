@@ -37,6 +37,63 @@ function Get-DirectorySummary {
     }
 }
 
+function Get-ScheduledTaskSummary {
+    param([string]$Name)
+
+    $getTask = Get-Command -Name Get-ScheduledTask -ErrorAction SilentlyContinue
+    if ($null -ne $getTask) {
+        $task = Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
+        if ($null -eq $task) { return $null }
+
+        $runtime = Get-ScheduledTaskInfo -TaskName $Name -ErrorAction Stop
+        return [ordered]@{
+            provider = 'ScheduledTasks'
+            state = [string]$task.State
+            last_run_time = if ($runtime.LastRunTime) { $runtime.LastRunTime.ToUniversalTime().ToString('o') } else { $null }
+            last_task_result = $runtime.LastTaskResult
+            next_run_time = if ($runtime.NextRunTime) { $runtime.NextRunTime.ToUniversalTime().ToString('o') } else { $null }
+            principal_user_id = [string]$task.Principal.UserId
+            run_level = [string]$task.Principal.RunLevel
+        }
+    }
+
+    # Windows Server 2008 R2 does not provide the ScheduledTasks PowerShell module.
+    # Use the Task Scheduler 2.0 COM API instead; this is available on 2008 R2 and later.
+    try {
+        $service = New-Object -ComObject 'Schedule.Service'
+        $service.Connect()
+        $folder = $service.GetFolder('\')
+        $task = $folder.GetTask($Name)
+        if ($null -eq $task) { return $null }
+
+        $stateMap = @{
+            0 = 'Unknown'
+            1 = 'Disabled'
+            2 = 'Queued'
+            3 = 'Ready'
+            4 = 'Running'
+        }
+        $state = if ($stateMap.ContainsKey([int]$task.State)) { $stateMap[[int]$task.State] } else { [string]$task.State }
+        $definition = $task.Definition
+
+        return [ordered]@{
+            provider = 'TaskSchedulerCOM'
+            state = $state
+            last_run_time = if ($task.LastRunTime -and $task.LastRunTime.Year -gt 1900) { $task.LastRunTime.ToUniversalTime().ToString('o') } else { $null }
+            last_task_result = $task.LastTaskResult
+            next_run_time = if ($task.NextRunTime -and $task.NextRunTime.Year -gt 1900) { $task.NextRunTime.ToUniversalTime().ToString('o') } else { $null }
+            principal_user_id = if ($null -ne $definition -and $null -ne $definition.Principal) { [string]$definition.Principal.UserId } else { $null }
+            run_level = if ($null -ne $definition -and $null -ne $definition.Principal) { [string]$definition.Principal.RunLevel } else { $null }
+        }
+    }
+    catch {
+        return [ordered]@{
+            provider = 'TaskSchedulerCOM'
+            error = $_.Exception.Message
+        }
+    }
+}
+
 $configPath = Join-Path $InstallRoot 'config.json'
 $statePath = Join-Path $InstallRoot 'state.json'
 $versionPath = Join-Path $InstallRoot 'VERSION'
@@ -52,20 +109,7 @@ if (Test-Path -LiteralPath $statePath) {
     $state = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
 }
 
-$task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-$taskInfo = $null
-if ($null -ne $task) {
-    $runtime = Get-ScheduledTaskInfo -TaskName $TaskName -ErrorAction Stop
-    $taskInfo = [ordered]@{
-        state = [string]$task.State
-        last_run_time = if ($runtime.LastRunTime) { $runtime.LastRunTime.ToUniversalTime().ToString('o') } else { $null }
-        last_task_result = $runtime.LastTaskResult
-        next_run_time = if ($runtime.NextRunTime) { $runtime.NextRunTime.ToUniversalTime().ToString('o') } else { $null }
-        principal_user_id = [string]$task.Principal.UserId
-        run_level = [string]$task.Principal.RunLevel
-    }
-}
-
+$taskInfo = Get-ScheduledTaskSummary -Name $TaskName
 $os = Get-WmiObject -Class Win32_OperatingSystem -ErrorAction Stop
 
 $evidence = [ordered]@{
