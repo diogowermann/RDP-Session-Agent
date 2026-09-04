@@ -1,3 +1,36 @@
+function ConvertTo-RdpSourceIp {
+    param($Address)
+
+    if ($null -eq $Address) {
+        return $null
+    }
+
+    $text = ([string]$Address).Trim()
+    if ([string]::IsNullOrWhiteSpace($text) -or $text -eq 'LOCAL') {
+        return $null
+    }
+
+    $parsed = $null
+    if (-not [System.Net.IPAddress]::TryParse($text, [ref]$parsed)) {
+        return $null
+    }
+
+    if ([System.Net.IPAddress]::IsLoopback($parsed)) {
+        return $null
+    }
+    if ($parsed.Equals([System.Net.IPAddress]::Any) -or $parsed.Equals([System.Net.IPAddress]::IPv6Any)) {
+        return $null
+    }
+
+    $family = $parsed.AddressFamily
+    if ($family -ne [System.Net.Sockets.AddressFamily]::InterNetwork -and
+        $family -ne [System.Net.Sockets.AddressFamily]::InterNetworkV6) {
+        return $null
+    }
+
+    return $parsed.ToString()
+}
+
 function Get-EventTypeName {
     param([Parameter(Mandatory=$true)][int]$EventId)
 
@@ -96,6 +129,11 @@ function Convert-LsmXmlToAgentEvent {
         return $null
     }
 
+    $sourceIp = $null
+    if ($eventType -eq 'LOGON' -or $eventType -eq 'RECONNECT') {
+        $sourceIp = ConvertTo-RdpSourceIp -Address $address
+    }
+
     return [PSCustomObject][ordered]@{
         event_id = $eventId
         record_id = [long]$recordIdNode.InnerText
@@ -103,6 +141,7 @@ function Convert-LsmXmlToAgentEvent {
         session_id = $sessionId
         username = $account.username
         domain = $account.domain
+        source_ip = $sourceIp
         occurred_at = [DateTime]::Parse($systemTime).ToUniversalTime().ToString('o')
         channel = [string]$channelNode.InnerText
     }

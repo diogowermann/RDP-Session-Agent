@@ -33,7 +33,8 @@ namespace RdpSessionAgent
         WTSUserName = 5,
         WTSWinStationName = 6,
         WTSDomainName = 7,
-        WTSConnectState = 8
+        WTSConnectState = 8,
+        WTSClientAddress = 14
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -111,6 +112,75 @@ function Get-WtsSessionString {
     }
 }
 
+function Convert-WtsClientAddressBytesToIp {
+    param(
+        [Parameter(Mandatory=$true)][int]$AddressFamily,
+        [Parameter(Mandatory=$true)][byte[]]$Address
+    )
+
+    $ip = $null
+    if ($AddressFamily -eq [int][System.Net.Sockets.AddressFamily]::InterNetwork) {
+        if ($Address.Length -lt 6) {
+            return $null
+        }
+        $text = '{0}.{1}.{2}.{3}' -f $Address[2], $Address[3], $Address[4], $Address[5]
+        if (-not [System.Net.IPAddress]::TryParse($text, [ref]$ip)) {
+            return $null
+        }
+    }
+    elseif ($AddressFamily -eq [int][System.Net.Sockets.AddressFamily]::InterNetworkV6) {
+        if ($Address.Length -lt 16) {
+            return $null
+        }
+        $ipv6Bytes = New-Object byte[] 16
+        [Array]::Copy($Address, 0, $ipv6Bytes, 0, 16)
+        $ip = New-Object System.Net.IPAddress -ArgumentList (,$ipv6Bytes)
+    }
+    else {
+        return $null
+    }
+
+    if ($null -eq $ip -or [System.Net.IPAddress]::IsLoopback($ip)) {
+        return $null
+    }
+    if ($ip.Equals([System.Net.IPAddress]::Any) -or $ip.Equals([System.Net.IPAddress]::IPv6Any)) {
+        return $null
+    }
+    return $ip.ToString()
+}
+
+function Get-WtsClientAddress {
+    param([Parameter(Mandatory=$true)][int]$SessionId)
+
+    $buffer = [IntPtr]::Zero
+    $bytes = 0
+    try {
+        $ok = [RdpSessionAgent.WtsNativeMethods]::WTSQuerySessionInformation(
+            [IntPtr]::Zero,
+            $SessionId,
+            [RdpSessionAgent.WTS_INFO_CLASS]::WTSClientAddress,
+            [ref]$buffer,
+            [ref]$bytes
+        )
+        if (-not $ok -or $buffer -eq [IntPtr]::Zero -or $bytes -lt 24) {
+            return $null
+        }
+
+        $addressFamily = [Runtime.InteropServices.Marshal]::ReadInt32($buffer, 0)
+        $addressBytes = New-Object byte[] 20
+        [Runtime.InteropServices.Marshal]::Copy([IntPtr]::Add($buffer, 4), $addressBytes, 0, 20)
+        return Convert-WtsClientAddressBytesToIp -AddressFamily $addressFamily -Address $addressBytes
+    }
+    catch {
+        return $null
+    }
+    finally {
+        if ($buffer -ne [IntPtr]::Zero) {
+            [RdpSessionAgent.WtsNativeMethods]::WTSFreeMemory($buffer)
+        }
+    }
+}
+
 function Get-WtsRdpSessions {
     Initialize-WtsNativeTypes
 
@@ -163,12 +233,15 @@ function Get-WtsRdpSessions {
                 $domain = $null
             }
 
+            $sourceIp = Get-WtsClientAddress -SessionId $info.SessionID
+
             $sessions += [PSCustomObject][ordered]@{
                 session_id = [int]$info.SessionID
                 username = $username
                 domain = $domain
                 state = $state
                 logon_at = $null
+                source_ip = $sourceIp
             }
         }
     }
