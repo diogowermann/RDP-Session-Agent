@@ -9,6 +9,7 @@ This directory contains the public technical documentation for RDP Session Agent
 - [System architecture](system-architecture.md) — Event Log and WTS sources, local persistence, spool reliability, authentication, TLS, Scheduled Task execution and deployment model.
 - [Phase 0 baseline capture](phase0-baseline.md) — pre-expansion per-server evidence, spool/task health and readiness gate.
 - [Phase 2 RDP client origin capture](phase2-origin-capture.md) — Event Log/WTS source IP collection, normalization, limitations and modern/legacy canary rollout.
+- [Phase 9 Windows rollout](phase9-windows-rollout.md) — credential-safe runtime update, per-server canary checks, rollback evidence and controlled batch expansion.
 
 ## Companion project
 
