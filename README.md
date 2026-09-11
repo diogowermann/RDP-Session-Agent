@@ -83,7 +83,7 @@ C:\ProgramData\RdpSessionAgent\
 
 The Git checkout is only the source used by the installer. The Scheduled Task executes the copy under `C:\ProgramData\RdpSessionAgent`.
 
-After a repository update, **re-run `Install-Agent.ps1`**. A `git pull` alone does not update the installed runtime.
+After a repository update, use the documented update procedure rather than assuming `git pull` changes the installed runtime. Phase 9 includes a native PowerShell self-test for the updater; it requires no external PowerShell module.
 
 ## Security model
 
