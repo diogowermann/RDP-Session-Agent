@@ -48,7 +48,7 @@ The server is ready when the Scheduled Task is healthy, API `last_seen` is curre
 
 ## Zero-dependency updater self-test
 
-The Phase 9 updater validation must run with the Windows/PowerShell components already required by the Agent. It does not require Pester or any other external PowerShell module.
+The Phase 9 updater validation uses only Windows PowerShell and .NET functionality already available in the supported Agent environment. It does not require Pester, PSGallery access or any additional PowerShell module.
 
 From the repository checkout:
 
