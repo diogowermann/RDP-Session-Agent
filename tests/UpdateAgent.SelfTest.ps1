@@ -49,6 +49,7 @@ function New-TestInstallation {
 }
 
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('RdpSessionAgent-SelfTest-' + [Guid]::NewGuid().ToString('N'))
+$exitCode = 0
 
 try {
     Write-Host '[1/2] Testing runtime update with preserved operational state...'
@@ -97,15 +98,15 @@ try {
 
     Write-Host '[PASS] Matching-version execution is a no-op.'
     Write-Host 'SELF-TEST PASSED: Update-Agent.ps1 requires no external PowerShell modules for this validation.'
-    exit 0
 }
 catch {
-    Write-Error $_
-    Write-Host 'SELF-TEST FAILED.'
-    exit 1
+    $exitCode = 1
+    Write-Host ("SELF-TEST FAILED: " + $_.Exception.Message)
 }
 finally {
     if (Test-Path -LiteralPath $testRoot) {
         Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
+
+exit $exitCode
