@@ -46,6 +46,27 @@ Get-Content (Join-Path $Root "logs\agent-$(Get-Date -Format yyyyMMdd).log") -Tai
 
 The server is ready when the Scheduled Task is healthy, API `last_seen` is current and spool is not growing continuously.
 
+## Zero-dependency updater self-test
+
+The Phase 9 updater validation must run with the Windows/PowerShell components already required by the Agent. It does not require Pester or any other external PowerShell module.
+
+From the repository checkout:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+    -File '.\tests\UpdateAgent.SelfTest.ps1'
+```
+
+The self-test uses an isolated temporary installation tree, invokes `Update-Agent.ps1` with Scheduled Task control disabled, verifies runtime replacement and rollback creation, and confirms that configuration, protected credential, state, spool and logs remain unchanged. It also validates the matching-version no-op path.
+
+A successful run ends with:
+
+```text
+SELF-TEST PASSED: Update-Agent.ps1 requires no external PowerShell modules for this validation.
+```
+
+This test does not modify the production Agent installation.
+
 ## Update procedure
 
 Update the approved source checkout first:
