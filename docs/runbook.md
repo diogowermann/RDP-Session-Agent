@@ -14,6 +14,7 @@ This runbook covers routine operation, incident containment, upgrade and recover
 | State | `C:\ProgramData\RdpSessionAgent\state.json` |
 | Logs | `C:\ProgramData\RdpSessionAgent\logs` |
 | Durable event spool | `C:\ProgramData\RdpSessionAgent\spool` |
+| Runtime rollback copies | `C:\ProgramData\RdpSessionAgent\rollback` |
 
 Run commands from an elevated Windows PowerShell prompt. Do not expose `credential.dat`, production configuration, usernames or session payloads in public tickets.
 
@@ -51,9 +52,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
 1. Query the task and its last result.
 2. Run the installed entry point manually as Administrator.
 3. Inspect the current Agent log and installed `VERSION`.
-4. Re-run `scripts\Install-Agent.ps1` from an approved checkout if the task definition or runtime copy is damaged.
+4. Re-run `scripts\Install-Agent.ps1` from an approved checkout only when the task definition, configuration or credential itself must be repaired.
 
-Reinstallation must use the same server identity and current secret. It refreshes code and the task while preserving state, logs and spool.
+Routine code upgrades should use `scripts\Update-Agent.ps1`, which preserves the existing machine identity, protected credential, state, logs and spool.
 
 ### Events accumulating in spool
 
@@ -91,13 +92,23 @@ Verify local WTS enumeration with `scripts\Test-Prerequisites.ps1`. A failed sna
 
 ## Upgrade
 
+Routine upgrades of an existing healthy installation must not require the plaintext Agent secret.
+
 1. Record installed `VERSION`, task state and spool count.
 2. Update the approved source checkout.
 3. Run the release tests and preflight.
-4. Re-run `Install-Agent.ps1` with the existing API URL, server ID and current secret.
-5. Trigger one run and verify logs, spool replay and API `last_seen`.
+4. Run `scripts\Update-Agent.ps1` from an elevated PowerShell prompt.
+5. Confirm the new installed `VERSION`.
+6. Trigger one task run and verify logs, spool replay, WTS reconciliation and API `last_seen`.
+7. For rollout canaries, validate `LOGON -> DISCONNECT -> RECONNECT -> LOGOFF` and source-IP behavior.
+
+`Update-Agent.ps1` replaces only `src` and `VERSION`. It preserves `config.json`, `credential.dat`, `state.json`, logs and spool, and creates a runtime rollback copy before replacement.
+
+Do not use `Install-Agent.ps1` as the normal upgrade path. The installer requires an Agent secret and is reserved for first installation, credential rotation or repair that genuinely requires rewriting installation configuration/credential material.
 
 `git pull` alone does not upgrade the installed runtime.
+
+See [Phase 9 Windows rollout](phase9-windows-rollout.md) for batch order, canary gates and rollback evidence.
 
 ## Containment and rollback
 
@@ -114,14 +125,18 @@ schtasks.exe /Change /TN 'RDP Session Agent' /ENABLE
 schtasks.exe /Run /TN 'RDP Session Agent'
 ```
 
-For code rollback, check out the last approved release and re-run `Install-Agent.ps1`. Preserve `state.json`, logs, spool and credential. Never copy these files between servers.
+For code rollback after a Phase 9 update, restore only `src` and `VERSION` from the rollback directory created by `Update-Agent.ps1`. Preserve `config.json`, `credential.dat`, `state.json`, logs and spool.
+
+If no updater rollback copy exists, check out the last approved release and use a controlled recovery procedure. Never copy operational state or credentials between servers.
 
 ## Credential rotation
 
 1. Rotate the server token through the API administration procedure.
-2. Reinstall the Agent immediately using the new secret.
+2. Reinstall the Agent immediately using `Install-Agent.ps1` with the new secret.
 3. Trigger a run and confirm acknowledgement.
 4. Verify no new spool backlog appears.
+
+Credential rotation is intentionally separate from routine code updates.
 
 ## Escalation evidence
 

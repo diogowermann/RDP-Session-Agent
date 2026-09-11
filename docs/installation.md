@@ -32,7 +32,7 @@ The API returns:
 - a unique `server_id`;
 - a one-time Agent secret.
 
-Store the secret securely. The API stores only its hash, so the original plaintext value cannot be recovered later.
+Store the secret securely during initial installation. The API stores only its hash, so the original plaintext value cannot be recovered later.
 
 Do not reuse the same Agent secret or `server_id` on another Windows server.
 
@@ -71,7 +71,9 @@ If HTTPS fails with a trust error, install the correct issuing CA certificate in
 
 ## 5. Install the Agent
 
-From the same elevated PowerShell prompt:
+Use `Install-Agent.ps1` for first installation, credential rotation, or repair that intentionally rewrites Agent configuration/credential material.
+
+From an elevated PowerShell prompt:
 
 ```powershell
 .\scripts\Install-Agent.ps1 `
@@ -92,7 +94,7 @@ The installer:
 - writes `config.json`;
 - protects the Agent secret with DPAPI `LocalMachine` scope in `credential.dat`;
 - creates `spool` and `logs` directories;
-- preserves existing operational state on update;
+- preserves existing operational state on reinstall;
 - restricts the installation directory ACL to `SYSTEM` and local Administrators;
 - creates a Scheduled Task named `RDP Session Agent`;
 - configures the task to run every minute as `SYSTEM` with highest privileges.
@@ -119,6 +121,7 @@ C:\ProgramData\RdpSessionAgent\
 ├── VERSION
 ├── logs\
 ├── spool\
+├── rollback\              # created by Update-Agent.ps1 when needed
 └── src\
 ```
 
@@ -288,27 +291,55 @@ Do **not** copy `credential.dat`, `config.json`, or `state.json` from another mo
 
 ## 15. Update an existing installation
 
-The Agent executes from `C:\ProgramData\RdpSessionAgent`, not directly from the Git checkout.
+Routine code updates use `Update-Agent.ps1` and do **not** require the plaintext Agent secret.
 
-After pulling a repository update, always re-run the installer:
+Update the source checkout:
 
 ```powershell
 git switch main
 git pull --ff-only
-
-.\scripts\Install-Agent.ps1 `
-    -ApiBaseUrl 'https://rdp-api.example.com/api/v1' `
-    -ServerId '00000000-0000-0000-0000-000000000000' `
-    -AgentSecret 'replace-with-the-existing-secret'
+Get-Content .\VERSION
 ```
 
-Reinstallation refreshes runtime files and the Scheduled Task while preserving `state.json`, logs, and pending spool data.
+Then run from an elevated prompt:
+
+```powershell
+.\scripts\Update-Agent.ps1
+```
+
+The updater:
+
+- verifies that an existing installation is present;
+- stages the repository runtime before changing production files;
+- creates a timestamped rollback copy of the currently installed `src` and `VERSION`;
+- temporarily disables/ends the Scheduled Task during the runtime swap;
+- replaces only `src` and `VERSION`;
+- preserves `config.json`, `credential.dat`, `state.json`, `spool` and `logs`;
+- restores the original enabled state of the Scheduled Task;
+- attempts automatic runtime restoration if replacement fails.
+
+The normal production command does not accept or need `AgentSecret`.
+
+After the update:
+
+```powershell
+Get-Content 'C:\ProgramData\RdpSessionAgent\VERSION'
+schtasks.exe /Run /TN 'RDP Session Agent'
+Start-Sleep -Seconds 10
+Get-Content "C:\ProgramData\RdpSessionAgent\logs\agent-$(Get-Date -Format yyyyMMdd).log" -Tail 50
+```
+
+Confirm API `last_seen`, WTS reconciliation and spool health. For Phase 9 rollout procedure and batch gates, see [Phase 9 Windows rollout](phase9-windows-rollout.md).
+
+`git pull` alone does not update the installed runtime.
 
 ## 16. Credential rotation
 
-If the API administrator rotates a server credential, immediately reinstall/update that Agent with the newly returned secret.
+Credential rotation is intentionally separate from routine code updates.
 
-A rotated previous token can no longer authenticate.
+If the API administrator rotates a server credential, immediately rerun `Install-Agent.ps1` for that server with the newly returned secret. The previous token can no longer authenticate.
+
+Do not use another server's secret and do not copy `credential.dat` between machines.
 
 ## 17. Troubleshooting checklist
 
@@ -349,6 +380,17 @@ Re-run:
 ```
 
 Then inspect the Agent log for WTS-specific errors.
+
+### Update-Agent.ps1 refuses to run
+
+Do not bypass its installation checks. Confirm that the server already has:
+
+- `C:\ProgramData\RdpSessionAgent\src`;
+- `VERSION`;
+- `config.json`;
+- `credential.dat`.
+
+If configuration or credential material is genuinely missing/corrupt, treat it as installation repair rather than a routine code update.
 
 ## 18. Current limitations
 
